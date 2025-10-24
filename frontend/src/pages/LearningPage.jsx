@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import Header from "../components/Header";
 import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import {
   ChevronLeft,
   Pause,
@@ -18,11 +19,11 @@ import {
 
 export default function Learning() {
   const navigate = useNavigate();
-  const { id } = useParams();
+  const { id: courseId } = useParams();
+  const { user, updateUser } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [learningData, setLearningData] = useState(null);
   const [expandedModule, setExpandedModule] = useState("module-1");
-  const [completedLessons, setCompletedLessons] = useState(new Set());
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -36,58 +37,46 @@ export default function Learning() {
   const playerContainerRef = useRef(null);
 
   useEffect(() => {
+    // Check if user has purchased this course
+    const hasPurchased = user?.purchasedCourses?.some(course => course.courseId === parseInt(courseId));
+    if (!hasPurchased) {
+      navigate('/courses');
+      return;
+    }
+
     const fetchLearningData = async () => {
       try {
         const response = await fetch('/data/learning.json');
         const data = await response.json();
-        const courseData = data[id];
+        const courseData = data[courseId];
         if (courseData) {
           setLearningData(courseData);
-          // Initialize completed lessons from data and localStorage
-          const completed = new Set();
-          courseData.modules?.forEach(module => {
-            module.lessons?.forEach(lesson => {
-              if (lesson.completed) {
-                completed.add(lesson.id);
+          // Load user's progress for this course
+          const userProgress = user?.purchasedCourses?.find(course => course.courseId === parseInt(courseId))?.progress;
+          if (userProgress) {
+            setExpandedModule(userProgress.currentLesson?.moduleTitle || "module-1");
+            // Set current lesson based on progress
+            const currentLesson = userProgress.currentLesson;
+            if (currentLesson) {
+              // Find and set the current lesson
+              const lesson = courseData.modules.flatMap(module => module.lessons).find(l => l.id === currentLesson.lessonId);
+              if (lesson) {
+                setLearningData(prev => ({
+                  ...prev,
+                  currentLesson: lesson
+                }));
               }
-            });
-          });
-
-          // Load saved progress from localStorage
-          const savedProgress = localStorage.getItem(`course-progress-${id}`);
-          if (savedProgress) {
-            const progressData = JSON.parse(savedProgress);
-            progressData.completedLessons.forEach(lessonId => {
-              completed.add(lessonId);
-            });
+            }
           }
-
-          setCompletedLessons(completed);
-          console.log('Loaded course data:', courseData);
         } else {
-          console.error('Course not found for id:', id);
-          console.log('Available course IDs:', Object.keys(data));
+          console.error('Course data not found');
         }
       } catch (error) {
         console.error('Error fetching learning data:', error);
       }
     };
     fetchLearningData();
-  }, [id]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, []);
+  }, [courseId, user, navigate]);
 
   const { modules, currentLesson } = learningData || {};
 
@@ -95,8 +84,56 @@ export default function Learning() {
     return <div>Loading...</div>;
   }
 
+  // Get all lessons in order
+  const allLessons = modules?.flatMap(module => module.lessons) || [];
+  const currentLessonIndex = allLessons.findIndex(lesson => lesson.id === currentLesson?.id);
+
+  const handlePrevious = () => {
+    if (currentLessonIndex > 0) {
+      const prevLesson = allLessons[currentLessonIndex - 1];
+      handleLessonClick(prevLesson);
+    }
+  };
+
+  const handleNext = () => {
+    if (currentLessonIndex < allLessons.length - 1) {
+      const nextLesson = allLessons[currentLessonIndex + 1];
+      handleLessonClick(nextLesson);
+    }
+  };
+
   const toggleModule = (moduleId) => {
     setExpandedModule(expandedModule === moduleId ? "" : moduleId);
+  };
+
+  const handleLessonClick = async (lesson) => {
+    // Update current lesson in learning data
+    const updatedLearningData = {
+      ...learningData,
+      currentLesson: lesson
+    };
+    setLearningData(updatedLearningData);
+
+    // Update progress on backend
+    try {
+      const token = localStorage.getItem('token');
+      await fetch('http://localhost:5000/api/users/course-progress', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          courseId: parseInt(courseId),
+          currentLesson: {
+            lessonId: lesson.id,
+            moduleTitle: expandedModule
+          },
+        }),
+      });
+    } catch (error) {
+      console.error('Error updating progress:', error);
+    }
   };
 
   const togglePlay = () => {
@@ -135,310 +172,260 @@ export default function Learning() {
     if (videoRef.current) {
       const duration = videoRef.current.duration;
       const currentTime = videoRef.current.currentTime;
-      setCurrentTime(currentTime);
       setDuration(duration);
-      const progress = (currentTime / duration) * 100;
-      setProgress(progress);
+      setCurrentTime(currentTime);
+      setProgress((currentTime / duration) * 100);
     }
   };
 
   const handleSeek = (e) => {
     if (videoRef.current) {
-      const seekTime = (e.target.value / 100) * videoRef.current.duration;
-      videoRef.current.currentTime = seekTime;
-      setProgress(e.target.value);
+      const rect = e.target.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const percentage = clickX / rect.width;
+      const newTime = percentage * duration;
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      setProgress(percentage * 100);
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      playerContainerRef.current?.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
     }
   };
 
   const formatTime = (time) => {
-    if (isNaN(time) || time === 0) return "00:00";
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-  };
-
-  const toggleFullscreen = () => {
-    const container = playerContainerRef.current;
-    if (!document.fullscreenElement) {
-      if (container.requestFullscreen) {
-        container.requestFullscreen();
-      } else if (container.mozRequestFullScreen) { /* Firefox */
-        container.mozRequestFullScreen();
-      } else if (container.webkitRequestFullscreen) { /* Chrome, Safari & Opera */
-        container.webkitRequestFullscreen();
-      } else if (container.msRequestFullscreen) { /* IE/Edge */
-        container.msRequestFullscreen();
-      }
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
-      } else if (document.mozCancelFullScreen) { /* Firefox */
-        document.mozCancelFullScreen();
-      } else if (document.webkitExitFullscreen) { /* Chrome, Safari & Opera */
-        document.webkitExitFullscreen();
-      } else if (document.msExitFullscreen) { /* IE/Edge */
-        document.msExitFullscreen();
-      }
-    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
   return (
-    <div className="min-h-screen bg-[#F6F8FA]">
+    <div className="min-h-screen bg-gray-50 flex">
       <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
-      <div className="flex mt-20">
-        {/* Sidebar */}
-        <aside className="w-[320px] h-[calc(100vh-89px)] bg-white border border-[#B5B7B9] overflow-y-auto">
-          {/* Course Header */}
-          <div className="p-6 border-b border-[#646971]">
-            <div className="flex gap-3 items-center mb-2">
-              <img
-                src={learningData.course.logo}
-                alt="Course"
-                className="w-[55px] h-[55px] rounded-full border border-[#766F6F]"
-              />
-              <div>
-                <h2 className="text-2xl font-bold text-black">{learningData.course.title}</h2>
-                <p className="text-sm text-[#9CA3AF]">{learningData.course.subtitle}</p>
-              </div>
-            </div>
+      {/* Sidebar */}
+      <div className="fixed left-0 top-16 h-full w-80 bg-white border-r border-gray-200 overflow-y-auto z-10">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">{learningData.course.title}</h2>
+            <button onClick={() => navigate('/courses')} className="text-gray-400 hover:text-gray-600">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
           </div>
 
-          {/* Module List */}
-          <div className="p-4 space-y-2">
-            {modules && modules.length > 0 ? (
-              modules.map((module) => (
-                <div key={module.id} className="space-y-2">
-                  <button
-                    onClick={() => toggleModule(module.id)}
-                    className="w-full flex items-center justify-between px-3 py-3 rounded-lg border border-[#909090] bg-white hover:bg-gray-50 transition-colors"
-                  >
-                    <span className="text-[#3B4453] font-['Space_Grotesk']">{module.title}</span>
-                    <ChevronDown className={`w-4 h-4 transition-transform ${expandedModule === module.id ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {expandedModule === module.id && module.lessons && module.lessons.length > 0 && (
-                    <div className="space-y-2 pl-1">
-                      {module.lessons.map((lesson) => {
-                        const isActive = currentLesson && currentLesson.id === lesson.id;
-                        const isCompleted = completedLessons.has(lesson.id);
-
-                        return (
-                          <div
-                            key={lesson.id}
-                            className={`rounded-lg p-3 transition-all cursor-pointer ${
-                              isActive
-                                ? 'bg-gradient-to-r from-[#A0FFF3] to-[#009EB9] shadow-[0_0_20px_rgba(110,253,186,0.3)]'
-                                : isCompleted
-                                ? 'bg-[#E4FFFB]'
-                                : 'bg-[#E4FFFB] hover:bg-[#D1F5F0]'
-                            }`}
-                            onClick={() => {
-                              // Update current lesson when clicked
-                              setLearningData(prev => ({
-                                ...prev,
-                                currentLesson: {
-                                  ...lesson,
-                                  module: module.title
-                                }
-                              }));
-                              // Mark lesson as completed when clicked (simulate watching)
-                              const newCompletedLessons = new Set([...completedLessons, lesson.id]);
-                              setCompletedLessons(newCompletedLessons);
-
-                              // Persist progress to localStorage
-                              const progressData = {
-                                courseId: id,
-                                completedLessons: Array.from(newCompletedLessons)
-                              };
-                              localStorage.setItem(`course-progress-${id}`, JSON.stringify(progressData));
-                            }}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                {lesson.type === 'document' ? (
-                                  <FileText className="w-3 h-4 flex-shrink-0 text-[#3B4453]" />
-                                ) : (
-                                  <Play className="w-3 h-4 fill-[#3B4453] text-[#3B4453]" />
-                                )}
-                                <div>
-                                  <div className="text-black font-normal">{lesson.title}</div>
-                                  <div className="text-xs text-[#3B4453] font-['Space_Grotesk']">{lesson.duration}</div>
-                                </div>
-                              </div>
-
-                              {isCompleted && (
-                                <Check className="w-4 h-4 flex-shrink-0" />
-                              )}
-
-                              {!isCompleted && !isActive && (
-                                <Circle className="w-4 h-4 flex-shrink-0" />
-                              )}
-
-                              {isActive && (
-                                <Check className="w-4 h-4 flex-shrink-0" />
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                <p>No modules available for this course.</p>
-                <p className="text-sm mt-2">Dummy data will be loaded soon.</p>
-              </div>
-            )}
-          </div>
-
-          {/* Progress Section */}
-          <div className="p-4 border-t border-[#A5A5A5] mt-auto">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-bold">Progress</span>
-              <span className="text-sm font-bold">
-                {learningData.modules ? Math.round((completedLessons.size / learningData.modules.reduce((total, module) => total + (module.lessons?.length || 0), 0)) * 100) : 0}%
-              </span>
-            </div>
-            <div className="w-full h-2 bg-[#374151] rounded-full overflow-hidden">
+          <div className="mb-6">
+          <div className="w-full bg-gray-200 rounded-full h-2">
               <div
-                className="h-full bg-gradient-to-r from-[#60A5FA] to-[#3B82F6] rounded-full transition-all duration-300"
-                style={{
-                  width: `${learningData.modules ? Math.round((completedLessons.size / learningData.modules.reduce((total, module) => total + (module.lessons?.length || 0), 0)) * 100) : 0}%`
-                }}
+                className="bg-blue-600 h-2 rounded-full"
+                style={{ width: `${user?.purchasedCourses?.find(course => course.courseId === parseInt(courseId))?.progress?.completedLessons?.length || 0}%` }}
               ></div>
             </div>
+            <p className="text-sm text-gray-600 mt-2">{user?.purchasedCourses?.find(course => course.courseId === parseInt(courseId))?.progress?.completedLessons?.length || 0}% Complete</p>
           </div>
-        </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 px-6 py-6">
-          {/* Back Button */}
-          <button 
-            onClick={() => navigate(-1)}
-            className="mb-6 w-10 h-10 rounded-full bg-white border border-[#D0D0D0] flex items-center justify-center hover:bg-gray-50 transition-colors"
-          >
-            <ChevronLeft className="w-7 h-7 text-[#595959]" />
-          </button>
+          <div className="space-y-2">
+            {modules.map((module) => (
+              <div key={module.id} className="border border-gray-200 rounded-lg">
+                <button
+                  onClick={() => toggleModule(module.id)}
+                  className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50"
+                >
+                  <span className="font-medium text-gray-900">{module.title}</span>
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform ${
+                      expandedModule === module.id ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
 
-          {/* Video Player */}
-          <div ref={playerContainerRef} className="relative rounded-xl overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.3)] mb-8 max-w-[993px] bg-black">
-            {currentLesson && currentLesson.videoUrl ? (
-              <video
-                ref={videoRef}
-                className="w-full h-full"
-                src={currentLesson.videoUrl}
-                onTimeUpdate={handleProgress}
-                onLoadedMetadata={handleProgress}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onClick={togglePlay}
-              />
-            ) : (
-              <div className="w-full h-[400px] flex items-center justify-center text-white">
-                <div className="text-center">
-                  <Play className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p className="text-xl">Video not available</p>
-                  <p className="text-sm opacity-75 mt-2">This is dummy content for demonstration</p>
-                </div>
+                {expandedModule === module.id && (
+                  <div className="px-4 pb-4 space-y-2">
+                    {module.lessons.map((lesson) => (
+                      <button
+                        key={lesson.id}
+                        onClick={() => handleLessonClick(lesson)}
+                        className={`w-full flex items-center gap-3 p-3 rounded-lg text-left hover:bg-gray-50 ${
+                          currentLesson?.id === lesson.id ? 'bg-blue-50 border border-blue-200' : ''
+                        }`}
+                      >
+                        {lesson.type === 'video' ? (
+                          <Play className="w-4 h-4 text-gray-400" />
+                        ) : (
+                          <FileText className="w-4 h-4 text-gray-400" />
+                        )}
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">{lesson.title}</p>
+                          <p className="text-xs text-gray-500">{lesson.duration}</p>
+                        </div>
+                        {user?.purchasedCourses?.find(course => course.courseId === parseInt(courseId))?.progress?.completedLessons?.some(cl => cl.lessonId === lesson.id) ? (
+                          <Check className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <Circle className="w-4 h-4 text-gray-300" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            <div className="absolute top-4 left-5 text-white/70 text-xl">
-              {currentLesson ? `${currentLesson.module || 'Module'} - ${currentLesson.title || 'Lesson'}` : 'Loading lesson...'}
-            </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="ml-80 flex-1 mt-16">
+        <main className="p-8 space-y-8">
+          {/* Video Player */}
+          <div
+            ref={playerContainerRef}
+            className="relative bg-black rounded-lg overflow-hidden"
+            style={{ aspectRatio: '16/9' }}
+          >
+            <video
+              ref={videoRef}
+              src={currentLesson?.videoUrl}
+              className="w-full h-full object-cover"
+              onTimeUpdate={handleProgress}
+              onLoadedMetadata={handleProgress}
+              onEnded={() => {
+                setIsPlaying(false);
+                // Mark lesson as completed
+                const token = localStorage.getItem('token');
+                fetch('http://localhost:5000/api/users/course-progress', {
+                  method: 'PUT',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({
+                    courseId: parseInt(courseId),
+                    completedLessons: [currentLesson.id],
+                  }),
+                }).then(response => {
+                  if (response.ok) {
+                    // Update user context with new progress
+                    const updatedUser = {
+                      ...user,
+                      purchasedCourses: user.purchasedCourses.map(course =>
+                        course.courseId === parseInt(courseId)
+                          ? {
+                              ...course,
+                              progress: {
+                                ...course.progress,
+                                completedLessons: [
+                                  ...(course.progress.completedLessons || []),
+                                  { lessonId: currentLesson.id, completedAt: new Date() }
+                                ]
+                              }
+                            }
+                          : course
+                      )
+                    };
+                    updateUser(updatedUser);
+
+                    // Auto-advance to next lesson if available
+                    if (currentLessonIndex < allLessons.length - 1) {
+                      const nextLesson = allLessons[currentLessonIndex + 1];
+                      setTimeout(() => {
+                        handleLessonClick(nextLesson);
+                      }, 1000); // Small delay to show completion
+                    }
+                  }
+                }).catch(error => console.error('Error updating progress:', error));
+              }}
+            />
 
             {/* Video Controls */}
-            <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/70 to-transparent p-4 flex flex-col justify-end">
-              {/* Seek Bar */}
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={progress}
-                onChange={handleSeek}
-                className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer range-sm accent-blue-500 mb-2"
-              />
-              <div className="flex items-center">
-                <button onClick={togglePlay} className="mr-4 hover:scale-110 transition-transform">
-                  {isPlaying ? (
-                    <Pause className="w-[18px] h-6 fill-white text-white" />
-                  ) : (
-                    <Play className="w-[18px] h-6 fill-white text-white" />
-                  )}
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+              <div className="flex items-center gap-4">
+                <button onClick={togglePlay} className="text-white hover:scale-110 transition-transform">
+                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
                 </button>
-                
+
+                <div className="flex-1 flex items-center gap-2">
+                  <span className="text-white text-sm">{formatTime(currentTime)}</span>
+                  <div
+                    className="flex-1 h-1 bg-gray-600 rounded-lg cursor-pointer"
+                    onClick={handleSeek}
+                  >
+                    <div
+                      className="h-full bg-white rounded-lg"
+                      style={{ width: `${progress}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-white text-sm">{formatTime(duration)}</span>
+                </div>
+
                 <div className="flex items-center gap-2">
-                  <button onClick={toggleMute} className="hover:scale-110 transition-transform">
-                    {isMuted || volume === 0 ? <VolumeX className="w-5 h-4 text-white" /> : <Volume2 className="w-5 h-4 text-white" />}
+                  <button onClick={toggleMute} className="text-white hover:scale-110 transition-transform">
+                    {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                   </button>
                   <input
                     type="range"
                     min="0"
                     max="1"
-                    step="0.05"
-                    value={isMuted ? 0 : volume}
+                    step="0.1"
+                    value={volume}
                     onChange={handleVolumeChange}
                     className="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer range-sm accent-white"
                   />
                 </div>
-                <span className="ml-4 text-white text-sm font-['Space_Grotesk']">{formatTime(currentTime)} / {formatTime(duration)}</span>
-                <button onClick={toggleFullscreen} className="ml-auto hover:scale-110 transition-transform">
-                  {isFullscreen ? <Minimize className="w-[14px] h-4 text-white" /> : <Maximize className="w-[14px] h-4 text-white" />}
+
+                <button onClick={toggleFullscreen} className="text-white hover:scale-110 transition-transform">
+                  {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
                 </button>
               </div>
             </div>
           </div>
 
           {/* Lesson Content */}
-          <div className="max-w-[896px] space-y-6">
-            {currentLesson && currentLesson.content ? (
-              <>
-                {/* Introduction Card */}
-                <div className="rounded-2xl border-l-4 border-black bg-white shadow-[0_4px_6px_rgba(0,0,0,0.1),0_10px_15px_rgba(0,0,0,0.1)] p-6">
-                  <p className="text-xl text-black text-justify leading-normal">
-                    {currentLesson.content.introduction}
-                  </p>
+          <div className="max-w-4xl space-y-6">
+            {/* Introduction Card */}
+            <div className="rounded-2xl border-l-4 border-black bg-white shadow-lg p-6">
+              <p className="text-xl text-black text-justify leading-normal">
+                {currentLesson?.content?.introduction}
+              </p>
+            </div>
+
+            {/* Key Concepts */}
+            <div className="space-y-4">
+              <h3 className="text-xl font-bold text-black">Key Concepts</h3>
+
+              {currentLesson?.content?.keyConcepts?.map((concept, index) => (
+                <div key={index} className={`rounded-lg border-l-4 ${concept.borderColor} ${concept.bgColor} shadow-lg p-5 space-y-2`}>
+                  <h4 className={`font-semibold ${concept.textColor}`}>{concept.title}</h4>
+                  <p className={`font-medium ${concept.descriptionColor || concept.textColor}`}>{concept.description}</p>
                 </div>
+              ))}
+            </div>
 
-                {/* Key Concepts */}
-                <div className="space-y-4">
-                  <h3 className="text-xl font-bold text-black">Key Concepts</h3>
+            {/* Navigation Buttons */}
+            <div className="flex items-center justify-between pt-8">
+              <button
+                onClick={handlePrevious}
+                disabled={currentLessonIndex <= 0}
+                className="px-6 py-3 rounded-lg bg-gray-600 text-white font-medium hover:bg-gray-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </button>
 
-                  {currentLesson.content.keyConcepts && currentLesson.content.keyConcepts.length > 0 ? (
-                    currentLesson.content.keyConcepts.map((concept, index) => (
-                      <div key={index} className={`rounded-lg border-l-4 ${concept.borderColor} ${concept.bgColor} shadow-[0_4px_4px_rgba(0,0,0,0.25)] p-5 space-y-2`}>
-                        <h4 className={`font-['Space_Grotesk'] ${concept.textColor}`}>{concept.title}</h4>
-                        <p className={`font-['Space_Grotesk'] ${concept.descriptionColor || concept.textColor}`}>{concept.description}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <p>No key concepts available for this lesson.</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Navigation Buttons */}
-                <div className="flex items-center justify-between pt-8">
-                  <button className="px-6 py-3 rounded-lg bg-[#374151] text-white font-['Space_Grotesk'] hover:bg-[#4B5563] transition-colors flex items-center gap-2">
-                    <ChevronLeft className="w-4 h-4" />
-                    Previous
-                  </button>
-
-                  <button className="px-6 py-3 rounded-lg bg-[#2563EB] text-white font-['Space_Grotesk'] shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:bg-[#1D4ED8] transition-colors flex items-center gap-2">
-                    Next
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="text-center py-16 text-gray-500">
-                <p className="text-xl mb-4">No lesson content available</p>
-                <p>This course is currently using dummy data. Content will be added soon.</p>
-              </div>
-            )}
+              <button
+                onClick={handleNext}
+                disabled={currentLessonIndex >= allLessons.length - 1}
+                className="px-6 py-3 rounded-lg bg-blue-600 text-white font-medium shadow-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </main>
       </div>

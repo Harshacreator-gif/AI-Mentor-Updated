@@ -16,6 +16,33 @@ const userSchema = mongoose.Schema(
       type: String,
       required: true,
     },
+    purchasedCourses: [{
+      courseId: {
+        type: Number,
+        required: true
+      },
+      courseTitle: {
+        type: String,
+        required: true
+      },
+      purchaseDate: {
+        type: Date,
+        default: Date.now
+      },
+      progress: {
+        completedLessons: [{
+          lessonId: String,
+          completedAt: {
+            type: Date,
+            default: Date.now
+          }
+        }],
+        currentLesson: {
+          lessonId: String,
+          moduleTitle: String
+        }
+      }
+    }],
   },
   {
     timestamps: true,

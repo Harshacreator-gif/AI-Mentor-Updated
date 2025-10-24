@@ -1,13 +1,17 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import Header from "../components/Header";
+import { useAuth } from "../context/AuthContext";
 
 export default function CoursePreview() {
   const { courseId } = useParams();
+  const navigate = useNavigate();
+  const { user, updateUser } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('personal');
   const [courseData, setCourseData] = useState(null);
   const [error, setError] = useState(null);
+  const [isPurchasing, setIsPurchasing] = useState(false);
 
   useEffect(() => {
     const fetchCourseData = async () => {
@@ -42,6 +46,50 @@ export default function CoursePreview() {
     };
     fetchCourseData();
   }, [courseId]);
+
+  const handlePurchase = async () => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    setIsPurchasing(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5000/api/users/purchase-course', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          courseId: courseId,
+          courseTitle: courseData.title,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Update user context with new purchased courses
+        const updatedUser = {
+          ...user,
+          purchasedCourses: data.purchasedCourses
+        };
+        updateUser(updatedUser);
+
+        // Navigate to learning page
+        navigate(`/learning/${courseId}`);
+      } else {
+        alert(data.message || 'Failed to purchase course');
+      }
+    } catch (error) {
+      console.error('Purchase error:', error);
+      alert('Failed to purchase course. Please try again.');
+    } finally {
+      setIsPurchasing(false);
+    }
+  };
 
   if (error) {
     return <div className="min-h-screen bg-[#F6F8FA] flex items-center justify-center"><div className="text-center"><h2 className="text-2xl font-bold text-gray-800 mb-4">{error}</h2><p className="text-gray-600">Please check the course ID and try again.</p></div></div>;
@@ -84,9 +132,9 @@ export default function CoursePreview() {
 
               <div className="flex flex-wrap items-center gap-4 lg:gap-6">
                 <div className="flex items-center gap-2">
-                  <img 
-                    src="/ui/avatar-4.png" 
-                    alt="Instructor" 
+                  <img
+                    src="/ui/avatar-4.png"
+                    alt="Instructor"
                     className="w-8 h-8 rounded-full"
                   />
                   <span className="text-[#6B7280] text-sm">
@@ -103,7 +151,7 @@ export default function CoursePreview() {
 
                 <div className="flex items-center gap-1 text-[#6B7280] text-sm">
                   <svg className="w-3.5 h-3.5" viewBox="0 0 15 15" fill="none">
-                    <path d="M10.3125 7.75C10.3125 8.35703 10.2797 8.94219 10.2223 9.5H5.15273C5.09258 8.94219 5.0625 8.35703 5.0625 7.75C5.0625 7.14297 5.09531 6.55781 5.15273 6H10.2223C10.2824 6.55781 10.3125 7.14297 10.3125 7.75ZM11.1 6H14.466C14.6109 6.56055 14.6875 7.1457 14.6875 7.75C14.6875 8.3543 14.6109 8.93945 14.466 9.5H11.1C11.1574 8.93672 11.1875 8.35156 11.1875 7.75C11.1875 7.14844 11.1574 6.56328 11.1 6ZM14.1789 5.125H10.9879C10.7145 3.37773 10.173 1.91484 9.47578 0.979687C11.6168 1.5457 13.3586 3.09883 14.1762 5.125H14.1789ZM10.102 5.125H5.27305C5.43984 4.12969 5.69688 3.24922 6.01133 2.53555C6.29844 1.89023 6.61836 1.42266 6.92734 1.12734C7.23359 0.8375 7.48789 0.75 7.6875 0.75C7.88711 0.75 8.14141 0.8375 8.44766 1.12734C8.75664 1.42266 9.07656 1.89023 9.36367 2.53555C9.68086 3.24648 9.93516 4.12695 10.102 5.125ZM4.38711 5.125H1.19609C2.01641 3.09883 3.75547 1.5457 5.89922 0.979687C5.20195 1.91484 4.66055 3.37773 4.38711 5.125ZM0.908984 6H4.275C4.21758 6.56328 4.1875 7.14844 4.1875 7.75C4.1875 8.35156 4.21758 8.93672 4.275 9.5H0.908984C0.764063 8.93945 0.6875 8.3543 0.6875 7.75C0.6875 7.1457 0.764063 6.56055 0.908984 6ZM6.01133 12.9617C5.69414 12.2508 5.43984 11.3703 5.27305 10.375H10.102C9.93516 11.3703 9.67812 12.2508 9.36367 12.9617C9.07656 13.607 8.75664 14.0746 8.44766 14.3699C8.14141 14.6625 7.88711 14.75 7.6875 14.75C7.48789 14.75 7.23359 14.6625 6.92734 14.3727C6.61836 14.0773 6.29844 13.6098 6.01133 12.9645V12.9617ZM4.38711 10.375C4.66055 12.1223 5.20195 13.5852 5.89922 14.5203C3.75547 13.9543 2.01641 12.4012 1.19609 10.375H4.38711ZM14.1789 10.375C13.3586 12.4012 11.6195 13.9543 9.47852 14.5203C10.1758 13.5852 10.7145 12.1223 10.9906 10.375H14.1789Z" fill="#6B7280"/>
+                    <path d="M10.3125 7.75C10.3125 8.35703 10.2797 8.94219 10.2223 9.5H5.15273C5.09258 8.94219 5.09258 8.35703 5.0625 7.75C5.0625 7.14297 5.09531 6.55781 5.15273 6H10.2223C10.2824 6.55781 10.3125 7.14297 10.3125 7.75ZM11.1 6H14.466C14.6109 6.56055 14.6875 7.1457 14.6875 7.75C14.6875 8.3543 14.6109 8.93945 14.466 9.5H11.1C11.1574 8.93672 11.1875 8.35156 11.1875 7.75C11.1875 7.14844 11.1574 6.56328 11.1 6ZM14.1789 5.125H10.9879C10.7145 3.37773 10.173 1.91484 9.47578 0.979687C11.6168 1.5457 13.3586 3.09883 14.1762 5.125H14.1789ZM10.102 5.125H5.27305C5.43984 4.12969 5.69688 3.24922 6.01133 2.53555C6.29844 1.89023 6.61836 1.42266 6.92734 1.12734C7.23359 0.8375 7.48789 0.75 7.6875 0.75C7.88711 0.75 8.14141 0.8375 8.44766 1.12734C8.75664 1.42266 9.07656 1.89023 9.36367 2.53555C9.68086 3.24648 9.93516 4.12695 10.102 5.125ZM4.38711 5.125H1.19609C2.01641 3.09883 3.75547 1.5457 5.89922 0.979687C5.20195 1.91484 4.66055 3.37773 4.38711 5.125ZM0.908984 6H4.275C4.21758 6.56328 4.1875 7.14844 4.1875 7.75C4.1875 8.35156 4.21758 8.93672 4.275 9.5H0.908984C0.764063 8.93945 0.6875 8.3543 0.6875 7.75C0.6875 7.1457 0.764063 6.56055 0.908984 6ZM6.01133 12.9617C5.69414 12.2508 5.43984 11.3703 5.27305 10.375H10.102C9.93516 11.3703 9.67812 12.2508 9.36367 12.9617C9.07656 13.607 8.75664 14.0746 8.44766 14.3699C8.14141 14.6625 7.88711 14.75 7.6875 14.75C7.48789 14.75 7.23359 14.6625 6.92734 14.3727C6.61836 14.0773 6.29844 13.6098 6.01133 12.9645V12.9617ZM4.38711 10.375C4.66055 12.1223 5.20195 13.5852 5.89922 14.5203C3.75547 13.9543 2.01641 12.4012 1.19609 10.375H4.38711ZM14.1789 10.375C13.3586 12.4012 11.6195 13.9543 9.47852 14.5203C10.1758 13.5852 10.7145 12.1223 10.9906 10.375H14.1789Z" fill="#6B7280"/>
                   </svg>
                   {courseData.language}
                 </div>
@@ -236,7 +284,7 @@ export default function CoursePreview() {
                 alt="Course preview"
                 className="w-full h-48 object-cover"
               />
-              
+
             </div>
 
             {/* Pricing Card */}
@@ -291,8 +339,12 @@ export default function CoursePreview() {
               </div>
 
               {/* CTA Buttons */}
-              <button className="w-full bg-gradient-to-r from-[#00BEA5] to-[#54D3C3] text-white text-base font-bold py-3 rounded-lg mb-4 hover:opacity-90 transition-opacity">
-                Buy Now
+              <button
+                onClick={handlePurchase}
+                disabled={isPurchasing}
+                className="w-full bg-gradient-to-r from-[#00BEA5] to-[#54D3C3] text-white text-base font-bold py-3 rounded-lg mb-4 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isPurchasing ? 'Purchasing...' : 'Buy Now'}
               </button>
               <button className="w-full border border-black text-[#54D3C3] text-base font-bold py-3 rounded-lg mb-6 hover:bg-gray-50 transition-colors">
                 Add to Cart

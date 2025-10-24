@@ -15,28 +15,37 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const loggedIn = localStorage.getItem('isLoggedIn');
+    const token = localStorage.getItem('token');
     const storedUser = localStorage.getItem('user');
-    if (loggedIn === 'true' && storedUser) {
+    if (token && storedUser) {
       setIsAuthenticated(true);
       setUser(JSON.parse(storedUser));
     }
   }, []);
 
-  const login = (userData, keepLoggedIn = false) => {
+  const login = (userData) => {
     setIsAuthenticated(true);
     setUser(userData);
-    if (keepLoggedIn) {
-      localStorage.setItem('isLoggedIn', 'true');
-      localStorage.setItem('user', JSON.stringify(userData));
-    }
+    localStorage.setItem('token', userData.token);
+    localStorage.setItem('user', JSON.stringify(userData));
   };
 
   const logout = () => {
     setIsAuthenticated(false);
     setUser(null);
-    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // Clear course progress from localStorage
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('course-progress-')) {
+        localStorage.removeItem(key);
+      }
+    });
+  };
+
+  const updateUser = (updatedUserData) => {
+    setUser(updatedUserData);
+    localStorage.setItem('user', JSON.stringify(updatedUserData));
   };
 
   const value = {
@@ -44,6 +53,7 @@ export const AuthProvider = ({ children }) => {
     user,
     login,
     logout,
+    updateUser,
   };
 
   return (
