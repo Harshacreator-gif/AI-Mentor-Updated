@@ -157,7 +157,7 @@ const purchaseCourse = async (req, res) => {
 // @access  Private
 const updateCourseProgress = async (req, res) => {
   try {
-    const { courseId, completedLessons, currentLesson } = req.body;
+    const { courseId, completedLessons, currentLesson, studyHours } = req.body;
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -170,6 +170,8 @@ const updateCourseProgress = async (req, res) => {
       return res.status(404).json({ message: 'Course not found in purchased courses' });
     }
 
+    let newLessonsCompleted = 0;
+
     // Update progress
     if (completedLessons) {
       const existingCompleted = user.purchasedCourses[courseIndex].progress.completedLessons || [];
@@ -180,10 +182,76 @@ const updateCourseProgress = async (req, res) => {
           completedAt: new Date()
         }));
       user.purchasedCourses[courseIndex].progress.completedLessons = [...existingCompleted, ...newCompleted];
+      newLessonsCompleted = newCompleted.length;
     }
 
     if (currentLesson) {
       user.purchasedCourses[courseIndex].progress.currentLesson = currentLesson;
+    }
+
+    // Update analytics
+    if (newLessonsCompleted > 0 || (studyHours && studyHours > 0)) {
+      const today = new Date();
+      const todayString = today.toDateString();
+
+      // Check if this is a new study day
+      const isNewDay = !user.analytics.lastStudyDate ||
+        new Date(user.analytics.lastStudyDate).toDateString() !== todayString;
+
+      if (isNewDay) {
+        user.analytics.daysStudied += 1;
+        user.analytics.lastStudyDate = today;
+      }
+
+      // Add study hours (assume 0.1667 hours per lesson if not provided)
+      const hoursToAdd = studyHours || (newLessonsCompleted * 0.1667);
+      user.analytics.totalHours += hoursToAdd;
+
+      // Add study session
+      user.analytics.studySessions.push({
+        date: today,
+        hours: hoursToAdd
+      });
+
+      // Update learning hours chart (last 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const dateKey = today.toISOString().split('T')[0];
+      const existingEntry = user.analytics.learningHoursChart.find(entry => entry.date === dateKey);
+
+      if (existingEntry) {
+        existingEntry.hours += hoursToAdd;
+      } else {
+        user.analytics.learningHoursChart.push({
+          date: dateKey,
+          hours: hoursToAdd
+        });
+      }
+
+      // Keep only last 7 days
+      user.analytics.learningHoursChart = user.analytics.learningHoursChart
+        .filter(entry => new Date(entry.date) >= sevenDaysAgo)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // Recalculate derived analytics
+      const totalPossibleDays = 30;
+      user.analytics.attendance = Math.min((user.analytics.daysStudied / totalPossibleDays) * 100, 100);
+      user.analytics.dailyHours = user.analytics.daysStudied > 0 ? user.analytics.totalHours / user.analytics.daysStudied : 0;
+      user.analytics.totalCourses = user.purchasedCourses.length;
+
+      // Check if course is completed
+      const Course = (await import('../models/Course.js')).default;
+      const courseData = await Course.findOne({ id: courseId });
+      if (courseData) {
+        const totalLessons = courseData.modules?.flatMap(module => module.lessons).length || 0;
+        const completedLessonsCount = user.purchasedCourses[courseIndex].progress.completedLessons.length;
+
+        if (completedLessonsCount >= totalLessons && totalLessons > 0) {
+          user.analytics.completedCourses += 1;
+          user.analytics.certificates += 1;
+        }
+      }
     }
 
     await user.save();

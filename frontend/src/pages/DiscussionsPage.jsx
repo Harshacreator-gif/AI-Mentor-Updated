@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import Header from '../components/Header'
 import Sidebar from '../components/Sidebar'
 import { useAuth } from '../context/AuthContext'
+import coursesData from '../../public/data/courses.json'
 import {
   Heart,
   Reply,
@@ -101,36 +102,55 @@ const DiscussionsPage = () => {
 
 
   const [discussions, setDiscussions] = useState([])
+  const [myCourses, setMyCourses] = useState([])
 
-  const myCourses = [
-    {
-      title: "React Fundamentals",
-      subtitle: "Lesson 18: State Management",
-      progress: 75,
-      lessons: "18/24",
-      image: "AI_Tutor_New_UI/Discussion_Room/react_fundamentals.png",
-      progressColor: "bg-indigo-600",
-      isActive: true
-    },
-    {
-      title: "Python for AI",
-      subtitle: "Lesson 9: Neural Networks",
-      progress: 45,
-      lessons: "9/20",
-      image: "AI_Tutor_New_UI/Discussion_Room/python_for_ai.png",
-      progressColor: "bg-purple-600",
-      isActive: false
-    },
-    {
-      title: "Digital Marketing",
-      subtitle: "Lesson 27: SEO Optimization",
-      progress: 90,
-      lessons: "27/30",
-      image: "AI_Tutor_New_UI/Discussion_Room/digital_marketing.png",
-      progressColor: "bg-cyan-600",
-      isActive: false
+  // Function to map purchased courses to display format
+  const mapPurchasedCoursesToDisplay = (purchasedCourses) => {
+    if (!purchasedCourses || purchasedCourses.length === 0) return []
+
+    return purchasedCourses.map((purchasedCourse, index) => {
+      const courseCard = coursesData.courseCards.find(card => card.id === purchasedCourse.courseId)
+      if (!courseCard) return null
+
+      const completedLessons = purchasedCourse.progress?.completedLessons?.length || 0
+      const totalLessons = parseInt(courseCard.lessons.split(' of ')[1]) || 1
+      const progress = Math.round((completedLessons / totalLessons) * 100)
+
+      const currentLesson = purchasedCourse.progress?.currentLesson
+      const subtitle = currentLesson ? `Lesson ${currentLesson.lessonId}: ${currentLesson.moduleTitle}` : courseCard.lessons
+
+      // Map courseId to image paths
+      const imageMap = {
+        1: "AI_Tutor_New_UI/Discussion_Room/react_fundamentals.png",
+        2: "AI_Tutor_New_UI/Discussion_Room/python_for_ai.png",
+        3: "AI_Tutor_New_UI/Discussion_Room/digital_marketing.png"
+      }
+
+      const progressColorMap = {
+        1: "bg-indigo-600",
+        2: "bg-purple-600",
+        3: "bg-cyan-600"
+      }
+
+      return {
+        title: purchasedCourse.courseTitle,
+        subtitle: subtitle,
+        progress: progress,
+        lessons: `${completedLessons}/${totalLessons}`,
+        image: imageMap[purchasedCourse.courseId] || "AI_Tutor_New_UI/Discussion_Room/react_fundamentals.png",
+        progressColor: progressColorMap[purchasedCourse.courseId] || "bg-indigo-600",
+        isActive: index === 0 // First course is active
+      }
+    }).filter(course => course !== null)
+  }
+
+  // Load dynamic courses data
+  useEffect(() => {
+    if (user && user.purchasedCourses) {
+      const dynamicCourses = mapPurchasedCoursesToDisplay(user.purchasedCourses)
+      setMyCourses(dynamicCourses)
     }
-  ]
+  }, [user])
 
   const handleSubmitQuestion = async (e) => {
     e.preventDefault();

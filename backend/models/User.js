@@ -60,6 +60,58 @@ const userSchema = mongoose.Schema(
         }
       }
     }],
+    analytics: {
+      totalHours: {
+        type: Number,
+        default: 0
+      },
+      daysStudied: {
+        type: Number,
+        default: 0
+      },
+      studySessions: [{
+        date: {
+          type: Date,
+          required: true
+        },
+        hours: {
+          type: Number,
+          required: true
+        }
+      }],
+      lastStudyDate: {
+        type: Date,
+        default: null
+      },
+      attendance: {
+        type: Number,
+        default: 0
+      },
+      avgMarks: {
+        type: Number,
+        default: 0
+      },
+      dailyHours: {
+        type: Number,
+        default: 0
+      },
+      totalCourses: {
+        type: Number,
+        default: 0
+      },
+      completedCourses: {
+        type: Number,
+        default: 0
+      },
+      certificates: {
+        type: Number,
+        default: 0
+      },
+      learningHoursChart: [{
+        date: String,
+        hours: Number
+      }]
+    },
   },
   {
     timestamps: true,

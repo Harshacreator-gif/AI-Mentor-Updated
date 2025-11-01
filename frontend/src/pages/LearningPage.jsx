@@ -301,7 +301,7 @@ export default function Learning() {
               onLoadedMetadata={handleProgress}
               onEnded={() => {
                 setIsPlaying(false);
-                // Mark lesson as completed
+                // Mark lesson as completed and update analytics
                 const token = localStorage.getItem('token');
                 fetch('http://localhost:5000/api/users/course-progress', {
                   method: 'PUT',

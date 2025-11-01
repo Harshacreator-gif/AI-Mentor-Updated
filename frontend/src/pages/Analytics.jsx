@@ -1,10 +1,164 @@
-import React, { useState } from 'react'
-import Header from '../components/Header'
+import React, { useState, useEffect } from 'react'
+import Header from '../components/Header' // Assuming Header is correctly imported
 import Sidebar from '../components/Sidebar'
+import { useAuth } from '../context/AuthContext'
 
 const Analytics = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [analyticsData, setAnalyticsData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const { user } = useAuth()
+  const [currentDate, setCurrentDate] = useState(new Date());
+
+  // Calendar generation logic
+  const generateCalendarGrid = (date, studyDays) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDayOfMonth = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const grid = [];
+    let dayCounter = 1;
+
+    for (let i = 0; i < 6; i++) {
+      const week = [];
+      for (let j = 0; j < 7; j++) {
+        if (i === 0 && j < firstDayOfMonth) {
+          week.push({ day: null });
+        } else if (dayCounter > daysInMonth) {
+          week.push({ day: null });
+        } else {
+          const isStudyDay = studyDays.includes(dayCounter);
+          week.push({ day: dayCounter, isStudyDay });
+          dayCounter++;
+        }
+      }
+      grid.push(week);
+      if (dayCounter > daysInMonth) break;
+    }
+    return grid;
+  };
+
+  const handlePrevMonth = () => {
+    setCurrentDate(prevDate => {
+      const newDate = new Date(prevDate);
+      newDate.setMonth(newDate.getMonth() - 1);
+      return newDate;
+    });
+  };
+
+  const handleNextMonth = () => {
+    setCurrentDate(prevDate => new Date(prevDate.setMonth(prevDate.getMonth() + 1)));
+  };
+
+  useEffect(() => {
+    const fetchAnalytics = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        if (!token) {
+          setError('No authentication token found')
+          setLoading(false)
+          return
+        }
+
+        const response = await fetch('http://localhost:5000/api/analytics', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch analytics data')
+        }
+
+        const data = await response.json()
+        setAnalyticsData(data)
+        setLoading(false)
+      } catch (err) {
+        setError(err.message)
+        setLoading(false)
+      }
+    }
+
+    if (user) {
+      fetchAnalytics()
+    }
+  }, [user])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <Sidebar
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          sidebarCollapsed={sidebarCollapsed}
+          setSidebarCollapsed={setSidebarCollapsed}
+          activePage="analytics"
+        />
+        <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${
+          sidebarCollapsed ? 'lg:ml-20' : 'lg:ml-80'
+        }`}>
+          <main className="flex-1 mt-16 overflow-x-hidden overflow-y-auto bg-gray-50 p-8">
+            <div className="max-w-7xl mx-auto space-y-8">
+              <div className="flex justify-center items-center h-64">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#FA946D] mx-auto"></div>
+                  <p className="mt-4 text-gray-600">Loading analytics...</p>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <Sidebar
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          sidebarCollapsed={sidebarCollapsed}
+          setSidebarCollapsed={setSidebarCollapsed}
+          activePage="analytics"
+        />
+        <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${
+          sidebarCollapsed ? 'lg:ml-20' : 'lg:ml-80'
+        }`}>
+          <main className="flex-1 mt-16 overflow-x-hidden overflow-y-auto bg-gray-50 p-8">
+            <div className="max-w-7xl mx-auto space-y-8">
+              <div className="flex justify-center items-center h-64">
+                <div className="text-center">
+                  <div className="text-red-600 text-lg">Error loading analytics</div>
+                  <p className="mt-2 text-gray-600">{error}</p>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  const studyDaysInCurrentMonth = analyticsData?.studySessions
+    .map(s => new Date(s.date))
+    .filter(d => d.getFullYear() === currentDate.getFullYear() && d.getMonth() === currentDate.getMonth())
+    .map(d => d.getDate()) || [];
+
+  const calendarGrid = generateCalendarGrid(currentDate, studyDaysInCurrentMonth);
+
+  const learningHoursChartData = analyticsData?.learningHoursChart || [];
+  const maxLearningHour = Math.max(...learningHoursChartData.map(d => d.hours), 1); // Avoid division by zero
+
+  const coursePerformanceData = user?.purchasedCourses?.map(course => ({
+    ...course,
+    // You might need to fetch course details to get total lessons for progress calculation
+  })) || [];
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -26,12 +180,12 @@ const Analytics = () => {
           <div className="max-w-7xl mx-auto space-y-8">
             {/* Metrics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-              {/* Attendance Card */}
+            {/* Attendance Card */}
               <div className="bg-white rounded-xl border border-[#E5E7EB] p-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-[#4B5563] text-sm mb-1">Attendance</div>
-                    <div className="text-[#16A34A] text-2xl font-bold">94%</div>
+                    <div className="text-[#16A34A] text-2xl font-bold">{analyticsData?.attendance || 0}%</div>
                   </div>
                   <div className="w-12 h-12 bg-[#DCFCE7] rounded-lg flex items-center justify-center">
                     <svg className="w-[14px] h-4" viewBox="0 0 14 16" fill="none">
@@ -46,7 +200,7 @@ const Analytics = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-[#4B5563] text-sm mb-1">Avg Marks</div>
-                  <div className="text-[#2563EB] text-2xl font-bold">87.5</div>
+                  <div className="text-[#2563EB] text-2xl font-bold">{analyticsData?.avgMarks || 0}</div>
                 </div>
                 <div className="w-12 h-12 bg-[#DBEAFE] rounded-lg flex items-center justify-center">
                   <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
@@ -61,7 +215,7 @@ const Analytics = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-[#4B5563] text-sm mb-1">Daily Hours</div>
-                  <div className="text-[#9333EA] text-2xl font-bold">4.2h</div>
+                  <div className="text-[#9333EA] text-2xl font-bold">{analyticsData?.dailyHours || 0}h</div>
                 </div>
                 <div className="w-12 h-12 bg-[#F3E8FF] rounded-lg flex items-center justify-center">
                   <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
@@ -76,7 +230,7 @@ const Analytics = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-[#4B5563] text-sm mb-1">Courses</div>
-                  <div className="text-[#EA580C] text-2xl font-bold">12</div>
+                  <div className="text-[#EA580C] text-2xl font-bold">{analyticsData?.totalCourses || 0}</div>
                 </div>
                 <div className="w-12 h-12 bg-[#FFEDD5] rounded-lg flex items-center justify-center">
                   <svg className="w-[14px] h-4" viewBox="0 0 14 16" fill="none">
@@ -91,18 +245,18 @@ const Analytics = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-[#4B5563] text-sm mb-1">Certificates</div>
-                  <div className="text-[#CA8A04] text-2xl font-bold">8</div>
+                  <div className="text-[#CA8A04] text-2xl font-bold">{analyticsData?.certificates || 0}</div>
                 </div>
                 <div className="w-12 h-12 bg-[#FEF9C3] rounded-lg flex items-center justify-center">
                   <svg className="w-3 h-4" viewBox="0 0 12 16" fill="none">
-                    <path d="M5.4314 0.171826C5.77515 -0.0562988 6.22515 -0.0562988 6.5689 0.171826L7.12515 0.537451C7.31265 0.659326 7.5314 0.718701 7.75328 0.706201L8.4189 0.665576C8.8314 0.640576 9.2189 0.865576 9.40328 1.23433L9.70328 1.8312C9.80328 2.0312 9.96578 2.19058 10.1627 2.29058L10.7658 2.5937C11.1345 2.77808 11.3595 3.16558 11.3345 3.57808L11.2939 4.2437C11.2814 4.46558 11.3408 4.68745 11.4627 4.87183L11.8314 5.42808C12.0595 5.77183 12.0595 6.22183 11.8314 6.56558L11.4627 7.12495C11.3408 7.31245 11.2814 7.5312 11.2939 7.75308L11.3345 8.4187C11.3595 8.8312 11.1345 9.2187 10.7658 9.40308L10.1689 9.70308C9.9689 9.80308 9.80953 9.96558 9.70953 10.1625L9.4064 10.7656C9.22203 11.1343 8.83453 11.3593 8.42203 11.3343L7.7564 11.2937C7.53453 11.2812 7.31265 11.3406 7.12828 11.4625L6.57203 11.8312C6.22828 12.0593 5.77828 12.0593 5.43453 11.8312L4.87515 11.4625C4.68765 11.3406 4.4689 11.2812 4.24703 11.2937L3.5814 11.3343C3.1689 11.3593 2.7814 11.1343 2.59703 10.7656L2.29703 10.1687C2.19703 9.9687 2.03453 9.80933 1.83765 9.70933L1.23453 9.4062C0.865777 9.22183 0.640777 8.83433 0.665776 8.42183L0.706402 7.7562C0.718902 7.53433 0.659527 7.31245 0.537652 7.12808L0.172027 6.5687C-0.0560985 6.22495 -0.0560985 5.77495 0.172027 5.4312L0.537652 4.87495C0.659527 4.68745 0.718902 4.4687 0.706402 4.24683L0.665776 3.5812C0.640777 3.1687 0.865777 2.7812 1.23453 2.59683L1.8314 2.29683C2.0314 2.1937 2.1939 2.0312 2.2939 1.8312L2.5939 1.23433C2.77828 0.865576 3.16578 0.640576 3.57828 0.665576L4.2439 0.706201C4.46578 0.718701 4.68765 0.659326 4.87203 0.537451L5.4314 0.171826ZM8.50015 5.99995C8.50015 5.33691 8.23676 4.70103 7.76792 4.23218C7.29908 3.76334 6.66319 3.49995 6.00015 3.49995C5.33711 3.49995 4.70123 3.76334 4.23238 4.23218C3.76354 4.70103 3.50015 5.33691 3.50015 5.99995C3.50015 6.66299 3.76354 7.29888 4.23238 7.76772C4.70123 8.23656 5.33711 8.49995 6.00015 8.49995C6.66319 8.49995 7.29908 8.23656 7.76792 7.76772C8.23676 7.29888 8.50015 6.66299 8.50015 5.99995ZM0.0407765 13.8062L1.38765 10.6031C1.3939 10.6062 1.39703 10.6093 1.40015 10.6156L1.70015 11.2125C2.06578 11.9375 2.82515 12.3781 3.63765 12.3312L4.30328 12.2906C4.30953 12.2906 4.3189 12.2906 4.32515 12.2968L4.8814 12.6656C5.04078 12.7687 5.20953 12.85 5.38453 12.9062L4.20953 15.6968C4.13765 15.8687 3.97828 15.9843 3.7939 16C3.60953 16.0156 3.4314 15.9312 3.3314 15.775L2.32515 14.2343L0.572026 14.4937C0.393901 14.5187 0.215777 14.4468 0.103277 14.3062C-0.00922346 14.1656 -0.0310985 13.9718 0.0376515 13.8062H0.0407765ZM7.79078 15.6937L6.61578 12.9062C6.79078 12.85 6.95953 12.7718 7.1189 12.6656L7.67515 12.2968C7.6814 12.2937 7.68765 12.2906 7.69703 12.2906L8.36265 12.3312C9.17515 12.3781 9.93453 11.9375 10.3002 11.2125L10.6002 10.6156C10.6033 10.6093 10.6064 10.6062 10.6127 10.6031L11.9627 13.8062C12.0314 13.9718 12.0064 14.1625 11.897 14.3062C11.7877 14.45 11.6064 14.5218 11.4283 14.4937L9.67515 14.2343L8.6689 15.7718C8.5689 15.9281 8.39078 16.0125 8.2064 15.9968C8.02203 15.9812 7.86265 15.8625 7.79078 15.6937Z" fill="#CA8A04"/>
+                    <path d="M6 0L8.5 2.5L11.5 1.5L10.5 4.5L13 7L10.5 9.5L11.5 12.5L8.5 11.5L6 14L3.5 11.5L0.5 12.5L1.5 9.5L-1 7L1.5 4.5L0.5 1.5L3.5 2.5L6 0Z" fill="#CA8A04"/>
                   </svg>
                 </div>
               </div>
             </div>
           </div>
-</div>
-          {/* Two Column Layout */}
+        </div>
+        {/* Two Column Layout */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
             {/* Left Column - Calendar */}
             <div className="xl:col-span-2">
@@ -111,13 +265,13 @@ const Analytics = () => {
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-xl font-semibold text-[#111827]">Class Calendar</h3>
                   <div className="flex items-center space-x-2">
-                    <button className="w-[26px] h-10 bg-[#F3F4F6] rounded-lg flex items-center justify-center">
+                    <button onClick={handlePrevMonth} className="w-[26px] h-10 bg-[#F3F4F6] rounded-lg flex items-center justify-center">
                       <svg className="w-[10px] h-4" viewBox="0 0 11 16" fill="none">
                         <path d="M1.21582 7.29365C0.825195 7.68428 0.825195 8.31865 1.21582 8.70928L7.21582 14.7093C7.60645 15.0999 8.24082 15.0999 8.63145 14.7093C9.02207 14.3187 9.02207 13.6843 8.63145 13.2937L3.3377 7.9999L8.62832 2.70615C9.01895 2.31553 9.01895 1.68115 8.62832 1.29053C8.2377 0.899902 7.60332 0.899902 7.2127 1.29053L1.2127 7.29053L1.21582 7.29365Z" fill="#4B5563"/>
                       </svg>
                     </button>
-                    <span className="text-lg text-[#111827] font-medium px-2">December 2024</span>
-                    <button className="w-[26px] h-10 bg-[#F3F4F6] rounded-lg flex items-center justify-center">
+                    <span className="text-lg text-[#111827] font-medium px-2">{currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}</span>
+                    <button onClick={handleNextMonth} className="w-[26px] h-10 bg-[#F3F4F6] rounded-lg flex items-center justify-center">
                       <svg className="w-[10px] h-4" viewBox="0 0 10 16" fill="none">
                         <path d="M9.70615 7.29365C10.0968 7.68428 10.0968 8.31865 9.70615 8.70928L3.70615 14.7093C3.31553 15.0999 2.68115 15.0999 2.29053 14.7093C1.8999 14.3187 1.8999 13.6843 2.29053 13.2937L7.58428 7.9999L2.29365 2.70615C1.90303 2.31553 1.90303 1.68115 2.29365 1.29053C2.68428 0.899902 3.31865 0.899902 3.70928 1.29053L9.70928 7.29053L9.70615 7.29365Z" fill="#4B5563"/>
                       </svg>
@@ -136,27 +290,22 @@ const Analytics = () => {
 
                 {/* Calendar Grid */}
                 <div className="grid grid-cols-7 gap-1">
-                  {/* Previous month days */}
-                  <div className="h-[104px] flex items-start justify-center pt-2">
-                    <span className="text-sm text-[#9CA3AF]">1</span>
-                  </div>
-                  <div className="h-[104px] flex items-start justify-center pt-2">
-                    <span className="text-sm text-[#9CA3AF]">2</span>
-                  </div>
-
-                  {/* Current month days */}
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
-                    let bgColor = '';
-                    if ([3, 16].includes(day)) bgColor = 'bg-[#EFF6FF]';
-                    else if ([5, 9, 19].includes(day)) bgColor = 'bg-[#F0FDF4]';
-                    else if ([12, 23].includes(day)) bgColor = 'bg-[#FEF2F2]';
-                    
-                    return (
-                      <div key={day} className={`h-[104px] flex items-start justify-center pt-2 ${bgColor} ${bgColor ? 'rounded-lg' : ''}`}>
-                        <span className="text-sm text-[#111827]">{day}</span>
-                      </div>
-                    );
-                  })}
+                  {calendarGrid.flat().map((dayInfo, index) => (
+                    <div
+                      key={index}
+                      className={`h-[104px] flex items-start justify-center pt-2 rounded-lg ${
+                        dayInfo.isStudyDay ? 'bg-[#EFF6FF]' : ''
+                      }`}
+                    >
+                      {dayInfo.day && (
+                        <span className={`text-sm ${
+                          dayInfo.isStudyDay ? 'text-blue-800 font-bold' : 'text-[#111827]'
+                        }`}>
+                          {dayInfo.day}
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
 
                 {/* Calendar Legend */}
@@ -231,11 +380,11 @@ const Analytics = () => {
                 </div>
               </div>
               <div className="h-64 flex items-end justify-between space-x-2">
-                {[9, 2, 3, 4, 1.5, 2, 6].map((height, index) => (
+                {learningHoursChartData.map((dayData, index) => (
                   <div key={index} className="flex-1 flex flex-col items-center">
-                    <div className="w-full bg-[#FA946D] opacity-80 rounded-t" style={{ height: `${height * 20}px` }}></div>
+                    <div className="w-full bg-[#FA946D] opacity-80 rounded-t" style={{ height: `${(dayData.hours / maxLearningHour) * 100}%` }}></div>
                     <div className="text-xs text-gray-600 mt-2">
-                      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index]}
+                      {new Date(dayData.date).toLocaleDateString('en-US', { weekday: 'short' })}
                     </div>
                   </div>
                 ))}
@@ -250,7 +399,7 @@ const Analytics = () => {
                   {/* Simplified pie chart representation */}
                   <div className="w-40 h-40 rounded-full bg-gradient-to-r from-[#3CC3DF] to-[#FA946D] flex items-center justify-center">
                     <div className="text-center">
-                      <div className="text-2xl font-bold text-gray-800">15</div>
+                      <div className="text-2xl font-bold text-gray-800">{analyticsData?.totalCourses || 0}</div>
                       <div className="text-xs text-gray-600">Total course</div>
                     </div>
                   </div>
@@ -277,46 +426,27 @@ const Analytics = () => {
           <div className="bg-white rounded-xl border border-[#E5E7EB] p-6 mt-8">
             <h3 className="text-lg font-semibold text-[#111827] mb-6">Course Performance</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Machine Learning */}
-              <div className="bg-[#F9FAFB] rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-medium text-[#111827]">Machine Learning</span>
-                  <span className="text-[#16A34A] text-sm font-medium">92%</span>
-                </div>
-                <div className="w-full bg-[#E5E7EB] rounded-full h-2 mb-3">
-                  <div className="bg-[#16A34A] h-2 rounded-full" style={{ width: '92%' }}></div>
-                </div>
-                <div className="space-y-1 text-sm">
-                  <div className="text-[#4B5563]">Quiz Score: 89% | Hours: 24h</div>
-                  <div className="text-[#2563EB]">AI Tip: Focus on neural networks</div>
-                </div>
-              </div>
-
-              {/* React Development */}
-              <div className="bg-[#F9FAFB] rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-medium text-[#111827]">React Development</span>
-                  <span className="text-[#2563EB] text-sm font-medium">87%</span>
-                </div>
-                <div className="w-full bg-[#E5E7EB] rounded-full h-2 mb-3">
-                  <div className="bg-[#2563EB] h-2 rounded-full" style={{ width: '87%' }}></div>
-                </div>
-                <div className="space-y-1 text-sm">
-                  <div className="text-[#4B5563]">Quiz Score: 85% | Hours: 18h</div>
-                  <div className="text-[#2563EB]">AI Tip: Practice hooks more</div>
-                </div>
-              </div>
-
-              {/* Data Structures */}
-              <div className="bg-[#F9FAFB] rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-medium text-[#111827]">Data Structures</span>
-                  <span className="text-[#6B7280] text-sm font-medium">--</span>
-                </div>
-                <div className="text-center text-[#6B7280] text-sm pt-8">
-                  Not started
-                </div>
-              </div>
+              {coursePerformanceData.length > 0 ? coursePerformanceData.map(course => {
+                const progress = course.progress?.completedLessons?.length || 0; // Simplified progress
+                const progressPercent = progress > 0 ? `${progress}%` : '--'; // Placeholder
+                return (
+                  <div key={course.courseId} className="bg-[#F9FAFB] rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-medium text-[#111827]">{course.courseTitle}</span>
+                      <span className="text-[#16A34A] text-sm font-medium">{progressPercent}</span>
+                    </div>
+                    <div className="w-full bg-[#E5E7EB] rounded-full h-2 mb-3">
+                      <div className="bg-[#16A34A] h-2 rounded-full" style={{ width: progressPercent }}></div>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="text-[#4B5563]">Progress: {progress} lessons</div>
+                      {/* AI Tip can be added later */}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <p className="text-gray-500 col-span-3 text-center">No courses to display performance for.</p>
+              )}
             </div>
           </div>
         </main>
