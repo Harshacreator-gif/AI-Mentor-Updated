@@ -21,11 +21,19 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+
+    // 🔥 FIX: password is OPTIONAL (for Google users)
     password: {
       type: String,
-      required: true,
+      required: false,
       minlength: 6,
     },
+
+    // ✅ optional but useful
+    googleId: {
+      type: String,
+    },
+
     role: {
       type: String,
       default: "user",
@@ -86,7 +94,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    // ✅ MOVED INSIDE SCHEMA
     settings: {
       notifications: {
         emailNotifications: { type: Boolean, default: true },
@@ -113,10 +120,10 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// ✅ SAFE password hashing
+// ✅ SAFE password hashing (NO CHANGE, already correct)
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
-    return next(); // 🔥 VERY IMPORTANT
+  if (!this.password || !this.isModified("password")) {
+    return next();
   }
 
   const salt = await bcrypt.genSalt(10);

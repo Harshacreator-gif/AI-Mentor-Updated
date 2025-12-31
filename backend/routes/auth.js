@@ -11,8 +11,7 @@ const generateToken = (id) => {
   });
 };
 
-// @route   POST /api/auth/register
-// @desc    Register a new user
+// ================= REGISTER =================
 router.post("/register", async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -22,7 +21,6 @@ router.post("/register", async (req, res) => {
     }
 
     const userExists = await User.findOne({ email });
-
     if (userExists) {
       return res.status(400).json({ message: "User already exists" });
     }
@@ -30,7 +28,7 @@ router.post("/register", async (req, res) => {
     const user = await User.create({
       name,
       email,
-      password, // hashed by pre-save hook
+      password,
     });
 
     res.status(201).json({
@@ -50,8 +48,7 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// @route   POST /api/auth/login
-// @desc    Authenticate user & get token
+// ================= LOGIN =================
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -64,7 +61,11 @@ router.post("/login", async (req, res) => {
 
     const user = await User.findOne({ email });
 
-    if (user && (await bcrypt.compare(password, user.password))) {
+    if (
+      user &&
+      user.password &&
+      (await bcrypt.compare(password, user.password))
+    ) {
       res.json({
         _id: user._id,
         firstName: user.firstName,
@@ -85,8 +86,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// 🔥 NEW: @route   POST /api/auth/google-login
-// @desc    Google OAuth login - exchange Firebase token for JWT
+// ================= GOOGLE LOGIN =================
 router.post("/google-login", async (req, res) => {
   try {
     const { idToken } = req.body;
@@ -95,16 +95,17 @@ router.post("/google-login", async (req, res) => {
       return res.status(400).json({ message: "ID token required" });
     }
 
-    // Decode Firebase ID token (client-side verified)
+    // Decode Firebase ID token (client verified)
     const payload = JSON.parse(
       Buffer.from(idToken.split(".")[1], "base64").toString()
     );
+
     const uid = payload.sub;
     const email = payload.email;
     const name = payload.name || email.split("@")[0];
 
-    // Find or create user
     let user = await User.findOne({ email });
+
     if (!user) {
       user = await User.create({
         name,
@@ -114,7 +115,6 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
-    // Generate your app's JWT
     const token = generateToken(user._id);
 
     res.json({
@@ -130,7 +130,7 @@ router.post("/google-login", async (req, res) => {
     });
   } catch (error) {
     console.error("Google login error:", error);
-    res.status(401).json({ message: "Google login failed" });
+    res.status(500).json({ message: "Google login failed" });
   }
 });
 
